@@ -1034,18 +1034,61 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
 {
     assert(y > 0);
 
-    uint8_t v_m1_m1;
-    uint8_t v_0_m1 = im->buf[(y - 1)*s];
-    uint8_t v_1_m1 = im->buf[(y - 1)*s + 1];
-    uint8_t v_m1_0;
-    uint8_t v = im->buf[y*s];
+    // Compare neighboring pixel values beforehand using SIMD
+    uint8_t *same_m1_m1 = aligned_alloc(16, s);
+    uint8_t *same_0_m1 = aligned_alloc(16, s);
+    uint8_t *same_1_m1 = aligned_alloc(16, s);
+    uint8_t *same_m1_0 = aligned_alloc(16, s);
+    uint8x16_t vv_0_m1;
+    uint8x16_t vv_1_m1;
+    uint8x16_t vv_m1_m1 = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint8x16_t vv_m1_0 = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint8x16_t vv;
+    int x;
+    for (x = 0; x < w; x += 16) {
+        vv_0_m1 = uint8x16_load(&im->buf[(y - 1)*s + x]);
+        vv_m1_m1 = __builtin_shufflevector(vv_0_m1, vv_m1_m1, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+        vv_1_m1 = __builtin_shufflevector(vv_0_m1, vv_0_m1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1);
+        vv_1_m1[15] = im->buf[y*s + x + 16];
+        vv = uint8x16_load(&im->buf[y*s + x]);
+        vv_m1_0 = __builtin_shufflevector(vv, vv_m1_0, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+
+        uint8x16_store(
+            &same_m1_m1[x],
+            (uint8x16_t)(vv_m1_m1 == vv)
+        );
+        uint8x16_store(
+            &same_0_m1[x],
+            (uint8x16_t)(vv_0_m1 == vv)
+        );
+        uint8x16_store(
+            &same_1_m1[x],
+            (uint8x16_t)(vv_1_m1 == vv)
+        );
+        uint8x16_store(
+            &same_m1_0[x],
+            (uint8x16_t)(vv_m1_0 == vv)
+        );
+    }
+    // Process the rest
+    for (x = x - 16; x < w - 1; x++) {
+      uint8_t v_m1_m1 = im->buf[(y - 1)*s + x - 1];
+      uint8_t v_0_m1 = im->buf[(y - 1)*s + x];
+      uint8_t v_1_m1 = im->buf[(y - 1)*s + x + 1];
+      uint8_t v_m1_0 = im->buf[y*s + x - 1];
+      uint8_t v = im->buf[y*s + x];
+      same_m1_m1[x] = (v_m1_m1 == v);
+      same_0_m1[x] = (v_0_m1 == v);
+      same_1_m1[x] = (v_1_m1 == v);
+      same_m1_0[x] = (v_m1_0 == v);
+    }
 
     for (int x = 1; x < w - 1; x++) {
-        v_m1_m1 = v_0_m1;
-        v_0_m1 = v_1_m1;
-        v_1_m1 = im->buf[(y - 1)*s + x + 1];
-        v_m1_0 = v;
-        v = im->buf[y*s + x];
+        uint8_t v_m1_m1 = im->buf[(y - 1)*s + x - 1];
+        uint8_t v_0_m1 = im->buf[(y - 1)*s + x];
+        uint8_t v_1_m1 = im->buf[(y - 1)*s + x + 1];
+        uint8_t v_m1_0 = im->buf[y*s + x - 1];
+        uint8_t v = im->buf[y*s + x];
 
         if (v == 127)
             continue;
@@ -1053,21 +1096,32 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
         // (dx,dy) pairs for 8 connectivity:
         // (-1, -1)    (0, -1)    (1, -1)
         // (-1, 0)    (REFERENCE)
-        DO_UNIONFIND2(-1, 0);
+        if (same_m1_0[x] != 0) {
+            unionfind_connect(uf, y*w + x, y*w + x + 1);
+        }
 
         if (x == 1 || !((v_m1_0 == v_m1_m1) && (v_m1_m1 == v_0_m1))) {
-            DO_UNIONFIND2(0, -1);
+            if (same_0_m1[x] != 0) {
+                unionfind_connect(uf, y*w + x, (y - 1)*w + x);
+            }
         }
 
         if (v == 255) {
             if (x == 1 || !(v_m1_0 == v_m1_m1 || v_0_m1 == v_m1_m1) ) {
-                DO_UNIONFIND2(-1, -1);
+                if (same_m1_m1[x] != 0) {
+                    unionfind_connect(uf, y*w + x, (y - 1)*w + x - 1);
+                }
             }
             if (!(v_0_m1 == v_1_m1)) {
-                DO_UNIONFIND2(1, -1);
+                if (same_1_m1[x] != 0) {
+                    unionfind_connect(uf, y*w + x, (y + 1)*w + x - 1);
+                }
             }
         }
     }
+
+    free(same_m1_m1);
+    free(same_0_m1);
 }
 #undef DO_UNIONFIND2
 

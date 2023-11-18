@@ -1122,6 +1122,8 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
 
     free(same_m1_m1);
     free(same_0_m1);
+    free(same_m1_0);
+    free(same_1_m1);
 }
 #undef DO_UNIONFIND2
 

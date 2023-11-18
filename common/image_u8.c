@@ -39,16 +39,20 @@ either expressed or implied, of the Regents of The University of Michigan.
 // needed for RGB in 8-wide vector processing)
 #define DEFAULT_ALIGNMENT_U8 96
 
-image_u8_t *image_u8_create_stride(unsigned int width, unsigned int height, unsigned int stride)
+image_u8_t *image_u8_create_stride_alignment(unsigned int width, unsigned int height, unsigned int stride, unsigned int alignment)
 {
-    uint8_t *buf = calloc(height*stride, sizeof(uint8_t));
-
+    uint8_t *buf = aligned_alloc(alignment, height*stride*sizeof(uint8_t));
+    memset(buf, 0, height*stride);
     // const initializer
     image_u8_t tmp = { .width = width, .height = height, .stride = stride, .buf = buf };
 
     image_u8_t *im = calloc(1, sizeof(image_u8_t));
     memcpy(im, &tmp, sizeof(image_u8_t));
     return im;
+}
+
+image_u8_t *image_u8_create_stride(unsigned int width, unsigned int height, unsigned int stride) {
+    return image_u8_create_stride_alignment(width, height, stride, DEFAULT_ALIGNMENT_U8);
 }
 
 image_u8_t *image_u8_create(unsigned int width, unsigned int height)
@@ -63,12 +67,12 @@ image_u8_t *image_u8_create_alignment(unsigned int width, unsigned int height, u
     if ((stride % alignment) != 0)
         stride += alignment - (stride % alignment);
 
-    return image_u8_create_stride(width, height, stride);
+    return image_u8_create_stride_alignment(width, height, stride, alignment);
 }
 
 image_u8_t *image_u8_copy(const image_u8_t *in)
 {
-    uint8_t *buf = malloc(in->height*in->stride*sizeof(uint8_t));
+    uint8_t *buf = aligned_alloc(DEFAULT_ALIGNMENT_U8, in->height*in->stride*sizeof(uint8_t));
     memcpy(buf, in->buf, in->height*in->stride*sizeof(uint8_t));
 
     // const initializer

@@ -42,6 +42,7 @@ either expressed or implied, of the Regents of The University of Michigan.
 #include "common/zmaxheap.h"
 #include "common/postscript_utils.h"
 #include "common/math_util.h"
+#include "common/vector_types.h"
 
 #ifdef _WIN32
 static inline long int random(void)
@@ -1220,7 +1221,19 @@ void do_threshold_task(void *p)
         for (int dy = 0; dy < tilesz; dy++) {
             int y = ty*tilesz + dy;
 
-            for (int dx = 0; dx < tilesz; dx++) {
+            int dx = 0;
+            for (dx = 0; dx < tilesz; dx += 16) {
+                int x = tx*tilesz + dx;
+
+                uint8x16_t v = uint8x16_load(&im->buf[y*s+x]);
+                uint8x16_store(
+                    &threshim->buf[y*s+x],
+                    (uint8x16_t)(v > thresh)  // Becomes -1=255 when true
+                );
+            }
+
+            // Process rest
+            for (dx = dx - 16; dx < tilesz; dx++) {
                 int x = tx*tilesz + dx;
 
                 uint8_t v = im->buf[y*s+x];

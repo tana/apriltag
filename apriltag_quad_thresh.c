@@ -1591,11 +1591,8 @@ zarray_t* do_gradient_clusters(image_u8_t* threshim, int ts, int y0, int y1, int
             if (v0 == 127)
                 continue;
 
-            // XXX don't query this until we know we need it?
-            uint64_t rep0 = unionfind_get_representative(uf, y*w + x);
-            if (unionfind_get_set_size(uf, rep0) < 25) {
-                continue;
-            }
+            bool rep0_computed = false;
+            uint64_t rep0;
 
             // whenever we find two adjacent pixels such that one is
             // white and the other black, we add the point half-way
@@ -1622,6 +1619,14 @@ zarray_t* do_gradient_clusters(image_u8_t* threshim, int ts, int y0, int y1, int
                 uint8_t v1 = threshim->buf[(y + dy)*ts + x + dx];       \
                                                                         \
                 if (v0 + v1 == 255) {                                   \
+                    if (!rep0_computed) {                               \
+                        rep0 = unionfind_get_representative(uf, y*w + x);   \
+                        rep0_computed = true;                           \
+                    }                                                   \
+                    if (unionfind_get_set_size(uf, rep0) < 25) {        \
+                        continue;                                       \
+                    }                                                   \
+                                                                        \
                     uint64_t rep1 = unionfind_get_representative(uf, (y + dy)*w + x + dx); \
                     if (unionfind_get_set_size(uf, rep1) > 24) {        \
                         uint64_t clusterid;                                 \

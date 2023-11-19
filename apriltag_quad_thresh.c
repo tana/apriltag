@@ -1041,17 +1041,19 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
     uint8_t *same_m1_0 = aligned_alloc(16, s);
     uint8x16_t vv_0_m1;
     uint8x16_t vv_1_m1;
-    uint8x16_t vv_m1_m1 = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    uint8x16_t vv_m1_0 = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint8x16_t vv_m1_m1;
+    uint8x16_t vv_m1_0;
     uint8x16_t vv;
     int x;
     for (x = 0; x < w; x += 16) {
+        uint8x16_t prev_vv = vv;
+        uint8x16_t prev_vv_0_m1 = vv_0_m1;
         vv_0_m1 = uint8x16_load(&im->buf[(y - 1)*s + x]);
-        vv_m1_m1 = __builtin_shufflevector(vv_0_m1, vv_m1_m1, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+        vv_m1_m1 = __builtin_shufflevector(prev_vv_0_m1, vv_0_m1, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30);
         vv_1_m1 = __builtin_shufflevector(vv_0_m1, vv_0_m1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1);
-        vv_1_m1[15] = im->buf[y*s + x + 16];
+        vv_1_m1[15] = im->buf[(y - 1)*s + x + 16];
         vv = uint8x16_load(&im->buf[y*s + x]);
-        vv_m1_0 = __builtin_shufflevector(vv, vv_m1_0, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+        vv_m1_0 = __builtin_shufflevector(prev_vv, vv, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30);
 
         uint8x16_store(
             &same_m1_m1[x],
@@ -1097,7 +1099,7 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
         // (-1, -1)    (0, -1)    (1, -1)
         // (-1, 0)    (REFERENCE)
         if (same_m1_0[x] != 0) {
-            unionfind_connect(uf, y*w + x, y*w + x + 1);
+            unionfind_connect(uf, y*w + x, y*w + x - 1);
         }
 
         if (x == 1 || !((v_m1_0 == v_m1_m1) && (v_m1_m1 == v_0_m1))) {
@@ -1114,7 +1116,7 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
             }
             if (!(v_0_m1 == v_1_m1)) {
                 if (same_1_m1[x] != 0) {
-                    unionfind_connect(uf, y*w + x, (y + 1)*w + x - 1);
+                    unionfind_connect(uf, y*w + x, (y - 1)*w + x + 1);
                 }
             }
         }
@@ -1277,26 +1279,14 @@ void do_threshold_task(void *p)
         for (int dy = 0; dy < tilesz; dy++) {
             int y = ty*tilesz + dy;
 
-            int dx = 0;
-            for (dx = 0; dx < tilesz; dx += 16) {
+            for (int dx = 0; dx < tilesz; dx += 4) {
                 int x = tx*tilesz + dx;
 
-                uint8x16_t v = uint8x16_load(&im->buf[y*s+x]);
-                uint8x16_store(
+                uint8x4_t v = uint8x4_load(&im->buf[y*s+x]);
+                uint8x4_store(
                     &threshim->buf[y*s+x],
-                    (uint8x16_t)(v > thresh)  // Becomes -1=255 when true
+                    (uint8x4_t)(v > thresh)  // Becomes -1=255 when true
                 );
-            }
-
-            // Process rest
-            for (dx = dx - 16; dx < tilesz; dx++) {
-                int x = tx*tilesz + dx;
-
-                uint8_t v = im->buf[y*s+x];
-                if (v > thresh)
-                    threshim->buf[y*s+x] = 255;
-                else
-                    threshim->buf[y*s+x] = 0;
             }
         }
     }

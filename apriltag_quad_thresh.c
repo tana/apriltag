@@ -1030,22 +1030,28 @@ static void do_unionfind_first_line(unionfind_t *uf, image_u8_t *im, int h, int 
     }
 }
 
+#undef DO_UNIONFIND2
+
+#define FLAGS_M1_M1 (1u << 0)
+#define FLAGS_0_M1 (1u << 1)
+#define FLAGS_1_M1 (1u << 2)
+#define FLAGS_M1_0 (1u << 3)
+#define FLAGS_M1_0_M1_M1 (1u << 4)
+#define FLAGS_M1_M1_0_M1 (1u << 5)
+#define FLAGS_0_M1_1_M1 (1u << 6)
+
 static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, int s, int y)
 {
     assert(y > 0);
 
     // Compare neighboring pixel values beforehand using SIMD
-    uint8_t *same_m1_m1 = aligned_alloc(16, s);
-    uint8_t *same_0_m1 = aligned_alloc(16, s);
-    uint8_t *same_1_m1 = aligned_alloc(16, s);
-    uint8_t *same_m1_0 = aligned_alloc(16, s);
+    uint8_t *flags_buf = aligned_alloc(16, s);
     uint8x16_t vv_0_m1;
     uint8x16_t vv_1_m1;
     uint8x16_t vv_m1_m1;
     uint8x16_t vv_m1_0;
     uint8x16_t vv;
-    int x;
-    for (x = 0; x < w; x += 16) {
+    for (int x = 0; x < w; x += 16) {
         uint8x16_t prev_vv = vv;
         uint8x16_t prev_vv_0_m1 = vv_0_m1;
         vv_0_m1 = uint8x16_load(&im->buf[(y - 1)*s + x]);
@@ -1056,41 +1062,35 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
         vv_m1_0 = __builtin_shufflevector(prev_vv, vv, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30);
 
         uint8x16_store(
-            &same_m1_m1[x],
-            (uint8x16_t)(vv_m1_m1 == vv)
-        );
-        uint8x16_store(
-            &same_0_m1[x],
-            (uint8x16_t)(vv_0_m1 == vv)
-        );
-        uint8x16_store(
-            &same_1_m1[x],
-            (uint8x16_t)(vv_1_m1 == vv)
-        );
-        uint8x16_store(
-            &same_m1_0[x],
-            (uint8x16_t)(vv_m1_0 == vv)
+            &flags_buf[x],
+            ((vv_m1_m1 == vv) & FLAGS_M1_M1)
+            | ((vv_0_m1 == vv) & FLAGS_0_M1)
+            | ((vv_1_m1 == vv) & FLAGS_1_M1)
+            | ((vv_m1_0 == vv) & FLAGS_M1_0)
+            | ((vv_m1_0 == vv_m1_m1) & FLAGS_M1_0_M1_M1)
+            | ((vv_m1_m1 == vv_0_m1) & FLAGS_M1_M1_0_M1)
+            | ((vv_0_m1 == vv_1_m1) & FLAGS_0_M1_1_M1)
         );
     }
     // Process the rest
-    for (x = x - 16; x < w - 1; x++) {
+    for (int x = w - (w % 16); x < w - 1; x++) {
       uint8_t v_m1_m1 = im->buf[(y - 1)*s + x - 1];
       uint8_t v_0_m1 = im->buf[(y - 1)*s + x];
       uint8_t v_1_m1 = im->buf[(y - 1)*s + x + 1];
       uint8_t v_m1_0 = im->buf[y*s + x - 1];
       uint8_t v = im->buf[y*s + x];
-      same_m1_m1[x] = (v_m1_m1 == v);
-      same_0_m1[x] = (v_0_m1 == v);
-      same_1_m1[x] = (v_1_m1 == v);
-      same_m1_0[x] = (v_m1_0 == v);
+      flags_buf[x] = ((v_m1_m1 == v) ? FLAGS_M1_M1 : 0)
+                | ((v_0_m1 == v) ? FLAGS_0_M1 : 0)
+                | ((v_1_m1 == v) ? FLAGS_1_M1 : 0)
+                | ((v_m1_0 == v) ? FLAGS_M1_0 : 0)
+                | ((v_m1_0 == v_m1_m1) ? FLAGS_M1_0_M1_M1 : 0)
+                | ((v_m1_m1 == v_0_m1) ? FLAGS_M1_M1_0_M1 : 0)
+                | ((v_0_m1 == v_1_m1) ? FLAGS_0_M1_1_M1 : 0);
     }
 
     for (int x = 1; x < w - 1; x++) {
-        uint8_t v_m1_m1 = im->buf[(y - 1)*s + x - 1];
-        uint8_t v_0_m1 = im->buf[(y - 1)*s + x];
-        uint8_t v_1_m1 = im->buf[(y - 1)*s + x + 1];
-        uint8_t v_m1_0 = im->buf[y*s + x - 1];
         uint8_t v = im->buf[y*s + x];
+        uint8_t flags = flags_buf[x];
 
         if (v == 127)
             continue;
@@ -1098,36 +1098,40 @@ static void do_unionfind_line2(unionfind_t *uf, image_u8_t *im, int h, int w, in
         // (dx,dy) pairs for 8 connectivity:
         // (-1, -1)    (0, -1)    (1, -1)
         // (-1, 0)    (REFERENCE)
-        if (same_m1_0[x] != 0) {
+        if (flags & FLAGS_M1_0) {
             unionfind_connect(uf, y*w + x, y*w + x - 1);
         }
 
-        if (x == 1 || !((v_m1_0 == v_m1_m1) && (v_m1_m1 == v_0_m1))) {
-            if (same_0_m1[x] != 0) {
+        if (x == 1 || !((flags & FLAGS_M1_0_M1_M1) && (flags & FLAGS_M1_M1_0_M1))) {
+            if (flags & FLAGS_0_M1) {
                 unionfind_connect(uf, y*w + x, (y - 1)*w + x);
             }
         }
 
         if (v == 255) {
-            if (x == 1 || !(v_m1_0 == v_m1_m1 || v_0_m1 == v_m1_m1) ) {
-                if (same_m1_m1[x] != 0) {
+            if (x == 1 || !((flags & FLAGS_M1_0_M1_M1) || (flags & FLAGS_M1_M1_0_M1)) ) {
+                if (flags & FLAGS_M1_M1) {
                     unionfind_connect(uf, y*w + x, (y - 1)*w + x - 1);
                 }
             }
-            if (!(v_0_m1 == v_1_m1)) {
-                if (same_1_m1[x] != 0) {
+            if (!(flags & FLAGS_0_M1_1_M1)) {
+                if (flags & FLAGS_1_M1) {
                     unionfind_connect(uf, y*w + x, (y - 1)*w + x + 1);
                 }
             }
         }
     }
-
-    free(same_m1_m1);
-    free(same_0_m1);
-    free(same_m1_0);
-    free(same_1_m1);
 }
-#undef DO_UNIONFIND2
+
+#undef FLAGS_M1_M1
+#undef FLAGS_0_M1
+#undef FLAGS_1_M1
+#undef FLAGS_M1_0
+#undef FLAGS_127
+#undef FLAGS_255
+#undef FLAGS_M1_0_M1_M1
+#undef FLAGS_M1_M1_0_M1
+#undef FLAGS_0_M1_1_M1
 
 static void do_unionfind_task2(void *p)
 {
